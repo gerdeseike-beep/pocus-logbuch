@@ -48,6 +48,9 @@ def prep(src, dst, row_height):
     proto = re.sub(r' w14:paraId="[0-9A-F]+"', '', proto)
     first, last = x.find(rows[2]), x.find(rows[-1]) + len(rows[-1])
     x = x[:first] + '{{ROWS}}' + x[last:]
+    # Platz fuer optionale Sammelbestaetigung des Supervisors direkt nach der Tabelle
+    t = x.find('</w:tbl>') + len('</w:tbl>')
+    x = x[:t] + '{{SUPBLOCK}}' + x[t:]
 
     zout = zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED)
     for item in zin.infolist():

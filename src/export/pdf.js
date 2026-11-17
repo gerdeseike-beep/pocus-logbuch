@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import logoUrl from '../assets/sgum-logo.png';
 import { examText, fmtDate } from '../utils.js';
+import { supBlockLines } from './docx.js';
 
 const RED = [255, 0, 0];
 const GREY = [217, 217, 217];
@@ -51,7 +52,7 @@ function footer(doc) {
   doc.setTextColor(0, 0, 0);
 }
 
-export async function buildPdf({ log, entries, settings, confirm, signDate }) {
+export async function buildPdf({ log, entries, settings, confirm, signDate, collective }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const logo = await loadLogo();
   const W = doc.internal.pageSize.getWidth();
@@ -89,7 +90,7 @@ export async function buildPdf({ log, entries, settings, confirm, signDate }) {
       ],
       ['Name (Blockschrift)', 'Unterschrift'],
     ];
-    body = entries.map((e) => [e.nr, fmtDate(e.date), examText(e), e.befund || '', e.supervisorName || '', '']);
+    body = entries.map((e) => [e.nr, fmtDate(e.date), examText(e), e.befund || '', e.supervisorName || '', collective ? 's. unten' : '']);
     const ws = [562, 1304, 2211, 2211, 1587, 1588].map(tw);
     columnStyles = Object.fromEntries(ws.map((w, i) => [i, { cellWidth: (w / ws.reduce((a, b) => a + b)) * usable }]));
   } else {
@@ -124,9 +125,38 @@ export async function buildPdf({ log, entries, settings, confirm, signDate }) {
     },
   });
 
-  // Antragsteller-Block
   let y = doc.lastAutoTable.finalY + 12;
   const H = doc.internal.pageSize.getHeight();
+  const lx = MARGIN + 40;
+
+  // Sammelbestaetigung Supervisor
+  if (log === 'sup' && collective) {
+    const b = supBlockLines(entries);
+    if (y + 42 > H - 24) {
+      doc.addPage();
+      header(doc, logo);
+      y = 40;
+    }
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(b.title, MARGIN, y);
+    y += 6;
+    doc.setFont('helvetica', 'normal');
+    const lines = doc.splitTextToSize(b.text, usable);
+    doc.text(lines, MARGIN, y);
+    y += lines.length * 5 + 5;
+    doc.text('Name:', MARGIN, y);
+    doc.text(b.name, lx, y);
+    y += 9;
+    doc.text('Datum:', MARGIN, y);
+    doc.text('________________________________', lx, y);
+    y += 9;
+    doc.text('Unterschrift:', MARGIN, y);
+    doc.text('________________________________', lx, y);
+    y += 16;
+  }
+
+  // Antragsteller-Block
   if (y + 50 > H - 24) {
     doc.addPage();
     header(doc, logo);
@@ -147,7 +177,6 @@ export async function buildPdf({ log, entries, settings, confirm, signDate }) {
     maxWidth: usable - 6,
   });
   y += 12;
-  const lx = MARGIN + 40;
   for (const [l, v] of [
     ['Name:', settings.name],
     ['Vorname:', settings.vorname],

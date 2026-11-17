@@ -459,6 +459,7 @@ function EntryList({ entries, supervisors, refs, onEdit }) {
 
 function Export({ entries, supervisors, settings }) {
   const [confirm, setConfirm] = useState(true);
+  const [collective, setCollective] = useState(true);
   const [signDate, setSignDate] = useState(todayIso());
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -475,7 +476,7 @@ function Export({ entries, supervisors, settings }) {
     const key = `${log}-${format}-${supervisor?.id || ''}`;
     setBusy(key);
     try {
-      const opts = { log, entries: list, settings, confirm, signDate };
+      const opts = { log, entries: list, settings, confirm, signDate, collective };
       const blob = format === 'pdf' ? await buildPdf(opts) : await buildDocx(opts);
       const who = [settings.name, settings.vorname].filter(Boolean).join('_');
       const base =
@@ -531,6 +532,9 @@ function Export({ entries, supervisors, settings }) {
       <div className="card stack">
         <h2>Supervidierte Untersuchungen</h2>
         <p className="muted small">Ein Dokument pro Supervisor, zur Unterschrift. Die Nummerierung entspricht dem Gesamtlogbuch.</p>
+        <label className="inline">
+          <input type="checkbox" checked={collective} onChange={(e) => setCollective(e.target.checked)} /> Sammelbestätigung: Supervisor unterschreibt einmal am Ende statt jede Zeile
+        </label>
         {supervisors.length === 0 && <p className="muted">Noch keine Supervisoren erfasst.</p>}
         {supervisors.map((s) => (
           <div className="row between sup-row" key={s.id}>
