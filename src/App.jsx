@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { auth, db, firebaseConfigured, googleProvider } from './firebase.js';
 import { BEFUND_QUICK, DEFAULT_SETTINGS, EXAM_TYPES, KOMPONENTEN, LOGS } from './constants.js';
+import { buildDocx } from './export/docx.js';
+import { buildPdf } from './export/pdf.js';
 import { downloadBlob, examText, fmtDate, numbered, slug, todayIso } from './utils.js';
 
 const TABS = [
@@ -474,8 +476,7 @@ function Export({ entries, supervisors, settings }) {
     setBusy(key);
     try {
       const opts = { log, entries: list, settings, confirm, signDate };
-      const mod = format === 'pdf' ? await import('./export/pdf.js') : await import('./export/docx.js');
-      const blob = format === 'pdf' ? await mod.buildPdf(opts) : await mod.buildDocx(opts);
+      const blob = format === 'pdf' ? await buildPdf(opts) : await buildDocx(opts);
       const who = [settings.name, settings.vorname].filter(Boolean).join('_');
       const base =
         log === 'sup'
