@@ -55,6 +55,7 @@ Tipp: Auf dem Handy die Seite im Browser über **Teilen > Zum Home-Bildschirm** 
 - **Erfassen:** Logbuch wählen, Untersuchungstyp(en) antippen, Befund eintragen, bei supervidierten Untersuchungen den Supervisor wählen oder neu anlegen. Logbuch und Supervisor bleiben für den nächsten Eintrag vorausgewählt.
 - **Übersicht:** Stand je Logbuch und pro Untersuchungstyp. Eine Untersuchung kann mehrere Typen abdecken (z.B. eFAST) und zählt dann bei jedem Typ.
 - **Export:** Eigenständiges Logbuch gesamt als PDF oder DOCX. Supervidiertes Logbuch pro Supervisor als PDF oder DOCX. Die Nummer (Nr.) entspricht der chronologischen Reihenfolge im Gesamtlogbuch.
+- **Unterschriften:** Sammelbestätigung (ein Kreuz im PDF setzt das Kreuz in allen Zeilen), Signaturfelder für Adobe Acrobat (digitale ID) oder Unterschrift direkt in der App (Finger/Stift).
 - **Einstellungen:** Name, Komponente, Ziele, Supervisoren umbenennen, JSON-Backup und Import.
 
 Hinweis: Das SIWF (Anhang 2, Kap. 1.2.1) fordert 200 Sonographien, wovon die ersten 100 unter Supervision.

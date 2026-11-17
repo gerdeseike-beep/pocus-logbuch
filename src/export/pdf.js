@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { autoTable } from 'jspdf-autotable';
 import logoUrl from '../assets/sgum-logo.png';
 import { examText, fmtDate } from '../utils.js';
@@ -55,6 +56,14 @@ function footer(doc) {
 export async function buildPdf({ log, entries, settings, confirm, signDate, collective, sigs = {} }) {
   const supSig = log === 'sup' ? sigs.supervisor : null;
   const appSig = sigs.applicant;
+  // Signaturfelder fuer Adobe Acrobat & Co. (nur wo keine gezeichnete Unterschrift steht)
+  const fields = [];
+  const addField = (name, x, y, w, h) => fields.push({ name, page: doc.getCurrentPageInfo().pageNumber, x, y, w, h });
+  // Ein Ankreuzfeld mit vielen Widgets: ein Klick setzt das Kreuz in allen Zeilen
+  const boxes = [];
+  const texts = [];
+  const addText = (name, x, y, w, h) => texts.push({ name, page: doc.getCurrentPageInfo().pageNumber, x, y, w, h });
+  const addBox = (x, y, size) => boxes.push({ page: doc.getCurrentPageInfo().pageNumber, x, y, w: size, h: size });
   const fit = (sig, maxH, maxW) => {
     const h = Math.min(maxH, (maxW * sig.h) / sig.w);
     return [(h * sig.w) / sig.h, h];
@@ -96,7 +105,7 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
       ],
       ['Name (Blockschrift)', 'Unterschrift'],
     ];
-    body = entries.map((e) => [e.nr, fmtDate(e.date), examText(e), e.befund || '', e.supervisorName || '', collective ? 's. unten' : '']);
+    body = entries.map((e) => [e.nr, fmtDate(e.date), examText(e), e.befund || '', e.supervisorName || '', '']);
     const ws = [562, 1304, 2211, 2211, 1587, 1588].map(tw);
     columnStyles = Object.fromEntries(ws.map((w, i) => [i, { cellWidth: (w / ws.reduce((a, b) => a + b)) * usable }]));
   } else {
@@ -133,6 +142,11 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
       if (supSig && !collective && d.section === 'body' && d.column.index === 5) {
         const [w, h] = fit(supSig, d.cell.height - 2, d.cell.width - 2);
         doc.addImage(supSig.dataUrl, 'PNG', d.cell.x + 1, d.cell.y + (d.cell.height - h) / 2, w, h);
+      } else if (log === 'sup' && collective && d.section === 'body' && d.column.index === 5) {
+        addBox(d.cell.x + 2, d.cell.y + 2, 4.5);
+      }
+      if (log === 'sup' && !collective && !supSig && d.section === 'body' && d.column.index === 5) {
+        addField(`Unterschrift_Supervisor_Nr_${d.row.raw[0]}`, d.cell.x + 0.5, d.cell.y + 0.5, d.cell.width - 1, d.cell.height - 1);
       }
     },
   });
@@ -154,20 +168,25 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
     doc.text(b.title, MARGIN, y);
     y += 6;
     doc.setFont('helvetica', 'normal');
-    const lines = doc.splitTextToSize(b.text, usable);
-    doc.text(lines, MARGIN, y);
+    const lines = doc.splitTextToSize(b.text, usable - 8);
+    addBox(MARGIN, y - 3.6, 4.5);
+    doc.text(lines, MARGIN + 8, y);
     y += lines.length * 5 + 5;
     doc.text('Name:', MARGIN, y);
     doc.text(b.name, lx, y);
     y += 9;
     doc.text('Datum:', MARGIN, y);
     doc.text(supSig && sigs.supervisorDate ? fmtDate(sigs.supervisorDate) : '________________________________', lx, y);
+    if (!supSig) addText('Datum_Supervisor', lx, y - 5, 60, 6);
     y += 9;
     doc.text('Unterschrift:', MARGIN, y);
     if (supSig) {
       const [w, h] = fit(supSig, 14, 60);
       doc.addImage(supSig.dataUrl, 'PNG', lx, y - h + 2, w, h);
-    } else doc.text('________________________________', lx, y);
+    } else {
+      doc.text('________________________________', lx, y);
+      addField('Unterschrift_Supervisor', lx, y - 7, 70, 8.5);
+    }
     y += 16;
   }
 
@@ -206,7 +225,10 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
   if (appSig) {
     const [w, h] = fit(appSig, 14, 60);
     doc.addImage(appSig.dataUrl, 'PNG', lx + 10, y - h + 2, w, h);
-  } else doc.text('________________________________', lx + 10, y);
+  } else {
+    doc.text('________________________________', lx + 10, y);
+    addField('Unterschrift_Antragsteller', lx + 10, y - 7, 70, 8.5);
+  }
 
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i++) {
@@ -217,5 +239,61 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
     doc.text(`Seite ${i} / ${pages}`, W - MARGIN, H - 10.5, { align: 'right' });
     doc.setTextColor(0);
   }
-  return doc.output('blob');
+  if (!fields.length && !boxes.length) return doc.output('blob');
+  return addFormFields(doc.output('arraybuffer'), fields, boxes, texts, !!supSig);
+}
+
+const MM = 72 / 25.4;
+
+/**
+ * Fuegt Formularfelder ein:
+ * - leere PDF-Signaturfelder (/FT /Sig), z.B. in Adobe Acrobat mit digitaler ID signierbar
+ * - ein Ankreuzfeld "Bestaetigung_Supervisor" mit Widgets in jeder Zeile und im Bestaetigungsblock
+ */
+async function addFormFields(bytes, fields, boxes, texts, checked) {
+  const pdf = await PDFDocument.load(bytes);
+  const form = pdf.getForm();
+  const ctx = pdf.context;
+  const pages = pdf.getPages();
+  const rect = (page, f) => {
+    const ph = page.getHeight();
+    return { x: f.x * MM, y: ph - (f.y + f.h) * MM, width: f.w * MM, height: f.h * MM };
+  };
+
+  if (boxes.length) {
+    const cb = form.createCheckBox('Bestaetigung_Supervisor');
+    for (const b of boxes) {
+      cb.addToPage(pages[b.page - 1], { ...rect(pages[b.page - 1], b), borderWidth: 0.8 });
+    }
+    if (checked) cb.check();
+  }
+
+  for (const t of texts) {
+    const tf = form.createTextField(t.name);
+    tf.addToPage(pages[t.page - 1], { ...rect(pages[t.page - 1], t), borderWidth: 0 });
+    tf.setFontSize(10);
+  }
+
+  for (const f of fields) {
+    const page = pages[f.page - 1];
+    const r = rect(page, f);
+    const widget = ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Widget',
+      FT: 'Sig',
+      T: PDFString.of(f.name),
+      Rect: [r.x, r.y, r.x + r.width, r.y + r.height],
+      F: 4,
+      P: page.ref,
+      MK: { BC: [0.6, 0.6, 0.6] },
+      BS: { W: 0.5, S: 'D' },
+    });
+    const ref = ctx.register(widget);
+    form.acroForm.addField(ref);
+    const annots = page.node.lookup(PDFName.of('Annots'));
+    if (annots) annots.push(ref);
+    else page.node.set(PDFName.of('Annots'), ctx.obj([ref]));
+  }
+  const out = await pdf.save({ useObjectStreams: false });
+  return new Blob([out], { type: 'application/pdf' });
 }
