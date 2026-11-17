@@ -5,7 +5,8 @@ Web-App zum Führen der beiden SGUM-Logbücher für den Fähigkeitsausweis POCUS
 **Funktionen**
 
 - Erfassen eigenständiger und supervidierter Untersuchungen (parallel, Ziel je 100).
-- Übersicht mit Fortschritt gesamt und pro Untersuchungstyp (Richtwerte anpassbar).
+- Übersicht mit Fortschritt je Logbuch und Anzahl pro Untersuchungstyp.
+- Import von Einträgen aus JSON (Backup oder Importdatei), Duplikate werden übersprungen.
 - Supervisoren werden gespeichert und als Auswahl angeboten.
 - Export als PDF oder DOCX im Layout der SGUM-Vorlagen. Supervidierte Exporte immer pro Supervisor, zur Unterschrift.
 - Daten in Firebase (Firestore), Login mit Google, Hosting auf Vercel.
@@ -54,9 +55,9 @@ Tipp: Auf dem Handy die Seite im Browser über **Teilen > Zum Home-Bildschirm** 
 - **Erfassen:** Logbuch wählen, Untersuchungstyp(en) antippen, Befund eintragen, bei supervidierten Untersuchungen den Supervisor wählen oder neu anlegen. Logbuch und Supervisor bleiben für den nächsten Eintrag vorausgewählt.
 - **Übersicht:** Stand je Logbuch und pro Untersuchungstyp. Eine Untersuchung kann mehrere Typen abdecken (z.B. eFAST) und zählt dann bei jedem Typ.
 - **Export:** Eigenständiges Logbuch gesamt als PDF oder DOCX. Supervidiertes Logbuch pro Supervisor als PDF oder DOCX. Die Nummer (Nr.) entspricht der chronologischen Reihenfolge im Gesamtlogbuch.
-- **Einstellungen:** Name, Komponente, Ziele, Richtwerte pro Typ, Supervisoren umbenennen, JSON-Backup.
+- **Einstellungen:** Name, Komponente, Ziele, Supervisoren umbenennen, JSON-Backup und Import.
 
-Hinweis: Das SIWF (Anhang 2, Kap. 1.2.1) fordert 200 Sonographien, wovon die ersten 100 unter Supervision. Die Richtwerte pro Untersuchungstyp sind keine offizielle Vorgabe.
+Hinweis: Das SIWF (Anhang 2, Kap. 1.2.1) fordert 200 Sonographien, wovon die ersten 100 unter Supervision.
 
 
 ## Lokale Entwicklung
@@ -66,5 +67,7 @@ cp .env.example .env.local   # Firebase-Werte eintragen
 npm install
 npm run dev
 ```
+
+Test mit Firebase-Emulatoren: `firebase emulators:start --only auth,firestore` und App mit `VITE_USE_EMULATOR=1` starten (zeigt einen Test-Login).
 
 Die Exportvorlagen in `public/templates/` sind die originalen SGUM-Vorlagen mit Platzhaltern. Sie werden mit `tools/prepare_templates.py` aus den Original-DOCX erzeugt.

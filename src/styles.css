@@ -109,3 +109,7 @@ table.types td:first-child { width: 46%; }
 .targets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
 .target { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; color: var(--text); }
 .target input { width: 70px; }
+.num { text-align: right; width: 70px; font-variant-numeric: tabular-nums; }
+.barcol { width: 22%; }
+.bar.neutral > div { background: var(--muted); opacity: .55; }
+.filebtn { flex-direction: row; color: var(--text); display: inline-flex; }

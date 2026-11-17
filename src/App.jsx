@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInAnonymously, signInWithPopup, signOut } from 'firebase/auth';
 import {
   addDoc,
   collection,
@@ -8,9 +8,10 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { auth, db, firebaseConfigured, googleProvider } from './firebase.js';
-import { BEFUND_QUICK, DEFAULT_SETTINGS, EXAM_TYPES, KOMPONENTEN, LOGS, TYPE_LABEL } from './constants.js';
+import { BEFUND_QUICK, DEFAULT_SETTINGS, EXAM_TYPES, KOMPONENTEN, LOGS } from './constants.js';
 import { downloadBlob, examText, fmtDate, numbered, slug, todayIso } from './utils.js';
 
 const TABS = [
@@ -53,6 +54,11 @@ function Login() {
       <button className="btn primary" onClick={() => signInWithPopup(auth, googleProvider).catch((e) => setErr(e.message))}>
         Mit Google anmelden
       </button>
+      {import.meta.env.VITE_USE_EMULATOR && (
+        <button className="btn ghost" onClick={() => signInAnonymously(auth)}>
+          Test-Login (Emulator)
+        </button>
+      )}
       {err && <p className="error">{err}</p>}
     </div>
   );
@@ -80,7 +86,6 @@ function useUserData(uid) {
         ...DEFAULT_SETTINGS,
         ...d,
         totalTarget: { ...DEFAULT_SETTINGS.totalTarget, ...(d.totalTarget || {}) },
-        typeTargets: { ...DEFAULT_SETTINGS.typeTargets, ...(d.typeTargets || {}) },
       });
     });
     return () => {
@@ -171,17 +176,10 @@ function Bar({ value, max }) {
 function Dashboard({ entries, settings, loaded, onNew }) {
   const count = (log, type) => entries.filter((e) => e.log === log && (!type || (e.types || []).includes(type))).length;
   const totals = { eigen: count('eigen'), sup: count('sup') };
-  const sorted = EXAM_TYPES.map((t) => ({
-    ...t,
-    eigen: count('eigen', t.id),
-    sup: count('sup', t.id),
-    target: settings.typeTargets[t.id] ?? 0,
-  }));
-  const missing = sorted
-    .map((t) => ({ ...t, gap: Math.max(0, t.target - t.eigen) + Math.max(0, t.target - t.sup) }))
-    .filter((t) => t.gap > 0)
-    .sort((a, b) => b.gap - a.gap)
-    .slice(0, 4);
+  const sorted = EXAM_TYPES.map((t) => ({ ...t, eigen: count('eigen', t.id), sup: count('sup', t.id) }));
+  const max = Math.max(1, ...sorted.map((t) => t.eigen + t.sup));
+  const rare = [...sorted].sort((a, b) => a.eigen + a.sup - (b.eigen + b.sup)).slice(0, 4);
+  const untyped = entries.filter((e) => !(e.types || []).length).length;
 
   if (!loaded) return <p className="muted">Laden …</p>;
 
@@ -204,10 +202,9 @@ function Dashboard({ entries, settings, loaded, onNew }) {
         ))}
       </div>
 
-      {missing.length > 0 && (
+      {entries.length > 0 && (
         <div className="card hint">
-          <strong>Am meisten Rückstand:</strong>{' '}
-          {missing.map((t) => `${t.label} (${t.gap})`).join(', ')}
+          <strong>Bisher am seltensten:</strong> {rare.map((t) => `${t.label} (${t.eigen + t.sup})`).join(', ')}
         </div>
       )}
 
@@ -217,31 +214,28 @@ function Dashboard({ entries, settings, loaded, onNew }) {
           <button className="btn primary small" onClick={onNew}>+ Erfassen</button>
         </div>
         <p className="muted small">
-          Richtwert pro Logbuch: anpassbar unter Einstellungen. Eine Untersuchung kann mehrere Typen abdecken.
+          Eine Untersuchung kann mehrere Typen abdecken und zählt dann bei jedem Typ.
+          {untyped > 0 && ` ${untyped} Einträge ohne Typ (z.B. Volumenstatus) zählen nur im Gesamttotal.`}
         </p>
         <table className="types">
           <thead>
             <tr>
               <th>Untersuchung</th>
-              <th>Eigenständig</th>
-              <th>Supervidiert</th>
+              <th className="num">Eigenst.</th>
+              <th className="num">Superv.</th>
+              <th className="num">Total</th>
+              <th className="barcol" />
             </tr>
           </thead>
           <tbody>
             {sorted.map((t) => (
               <tr key={t.id}>
                 <td>{t.label}</td>
-                <td>
-                  <div className="cnt">
-                    <span>{t.eigen}/{t.target}</span>
-                    <Bar value={t.eigen} max={t.target} />
-                  </div>
-                </td>
-                <td>
-                  <div className="cnt">
-                    <span>{t.sup}/{t.target}</span>
-                    <Bar value={t.sup} max={t.target} />
-                  </div>
+                <td className="num">{t.eigen}</td>
+                <td className="num">{t.sup}</td>
+                <td className="num"><strong>{t.eigen + t.sup}</strong></td>
+                <td className="barcol">
+                  <div className="bar neutral"><div style={{ width: `${((t.eigen + t.sup) / max) * 100}%` }} /></div>
                 </td>
               </tr>
             ))}
@@ -575,6 +569,65 @@ function Settings({ settings, supervisors, entries, refs }) {
     if (window.confirm(`${sup.name} löschen?`)) await deleteDoc(doc(refs.supervisors, sup.id));
   };
 
+  const [importMsg, setImportMsg] = useState('');
+  const importFile = async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const list = (data.entries || []).filter((e) => e.date && (e.log === 'eigen' || e.log === 'sup'));
+      if (!list.length) return setImportMsg('Keine gültigen Einträge in der Datei.');
+      const supByName = Object.fromEntries(supervisors.map((x) => [x.name.trim().toLowerCase(), x.id]));
+      const key = (e) => [e.log, e.date, (e.types || []).join(','), e.extra || '', e.befund || ''].join('|');
+      const existing = new Set(entries.map(key));
+      let batch = writeBatch(db);
+      let ops = 0;
+      let added = 0;
+      let skipped = 0;
+      for (const e of list) {
+        if (existing.has(key(e))) {
+          skipped++;
+          continue;
+        }
+        let supervisorId = null;
+        let supervisorName = null;
+        if (e.log === 'sup' && e.supervisorName) {
+          supervisorName = e.supervisorName.trim();
+          const k = supervisorName.toLowerCase();
+          if (!supByName[k]) {
+            const r = doc(refs.supervisors);
+            batch.set(r, { name: supervisorName, createdAt: Date.now(), lastUsed: Date.now() });
+            supByName[k] = r.id;
+            ops++;
+          }
+          supervisorId = supByName[k];
+        }
+        batch.set(doc(refs.entries), {
+          log: e.log,
+          date: e.date,
+          types: e.types || [],
+          extra: e.extra || '',
+          befund: e.befund || '',
+          supervisorId,
+          supervisorName,
+          createdAt: e.createdAt || Date.now() + added,
+        });
+        existing.add(key(e));
+        added++;
+        if (++ops >= 400) {
+          await batch.commit();
+          batch = writeBatch(db);
+          ops = 0;
+        }
+      }
+      if (ops) await batch.commit();
+      setImportMsg(`${added} Einträge importiert${skipped ? `, ${skipped} bereits vorhanden und übersprungen` : ''}.`);
+    } catch (err) {
+      setImportMsg('Import fehlgeschlagen: ' + err.message);
+    }
+  };
+
   const backup = () => {
     const blob = new Blob([JSON.stringify({ settings, supervisors, entries }, null, 2)], { type: 'application/json' });
     downloadBlob(blob, `pocus-logbuch-backup_${todayIso()}.json`);
@@ -617,20 +670,6 @@ function Settings({ settings, supervisors, entries, refs }) {
             </label>
           ))}
         </div>
-        <div className="lbl">Richtwert pro Untersuchungstyp (je Logbuch)</div>
-        <div className="targets">
-          {EXAM_TYPES.map((t) => (
-            <label key={t.id} className="target">
-              <span>{TYPE_LABEL[t.id]}</span>
-              <input
-                type="number"
-                min="0"
-                value={s.typeTargets[t.id]}
-                onChange={(e) => setS({ ...s, typeTargets: { ...s.typeTargets, [t.id]: Number(e.target.value) } })}
-              />
-            </label>
-          ))}
-        </div>
         <div className="row">
           <button className="btn primary" onClick={save}>Speichern</button>
           {saved && <span className="ok">{saved}</span>}
@@ -651,9 +690,20 @@ function Settings({ settings, supervisors, entries, refs }) {
         ))}
       </div>
 
-      <div className="card row between">
-        <span className="muted small">Datensicherung aller Einträge als JSON</span>
-        <button className="btn small" onClick={backup}>Backup herunterladen</button>
+      <div className="card stack">
+        <h2>Daten</h2>
+        <div className="row between wrap">
+          <span className="muted small">Datensicherung aller Einträge als JSON</span>
+          <button className="btn small" onClick={backup}>Backup herunterladen</button>
+        </div>
+        <div className="row between wrap">
+          <span className="muted small">Einträge aus JSON-Datei importieren (Backup oder Importdatei). Doppelte werden übersprungen.</span>
+          <label className="btn small filebtn">
+            Import …
+            <input type="file" accept="application/json,.json" onChange={importFile} hidden />
+          </label>
+        </div>
+        {importMsg && <span className="ok">{importMsg}</span>}
       </div>
     </div>
   );

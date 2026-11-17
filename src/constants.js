@@ -45,8 +45,6 @@ export const DEFAULT_SETTINGS = {
   vorname: '',
   komponente: KOMPONENTEN[0],
   totalTarget: { eigen: 100, sup: 100 },
-  // Richtwert pro Untersuchungstyp und Logbuch. Das SIWF gibt keine Mindestzahl pro Typ vor.
-  typeTargets: Object.fromEntries(EXAM_TYPES.map((t) => [t.id, 8])),
 };
 
 export const BEFUND_QUICK = ['Normalbefund', 'Kein Nachweis', 'Nachweis', 'Fragliche Beurteilbarkeit'];
