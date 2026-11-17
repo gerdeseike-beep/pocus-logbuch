@@ -89,7 +89,7 @@ export async function buildPdf({ log, entries, settings, confirm, signDate }) {
       ],
       ['Name (Blockschrift)', 'Unterschrift'],
     ];
-    body = entries.map((e) => [e.nr, fmtDate(e.date), examText(e), e.befund || '', (e.supervisorName || '').toUpperCase(), '']);
+    body = entries.map((e) => [e.nr, fmtDate(e.date), examText(e), e.befund || '', e.supervisorName || '', '']);
     const ws = [562, 1304, 2211, 2211, 1587, 1588].map(tw);
     columnStyles = Object.fromEntries(ws.map((w, i) => [i, { cellWidth: (w / ws.reduce((a, b) => a + b)) * usable }]));
   } else {

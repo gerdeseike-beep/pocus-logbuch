@@ -26,7 +26,7 @@ export async function buildDocx({ log, entries, settings, confirm, signDate }) {
   const rows = entries
     .map((e) => {
       const cells = [e.nr, fmtDate(e.date), examText(e), e.befund];
-      if (log === 'sup') cells.push((e.supervisorName || '').toUpperCase(), '');
+      if (log === 'sup') cells.push(e.supervisorName || '', '');
       return fill(rowTpl, Object.fromEntries(cells.map((c, i) => [`C${i}`, esc(c)])));
     })
     .join('');
