@@ -580,9 +580,22 @@ function Settings({ settings, supervisors, entries, refs }) {
       if (!list.length) return setImportMsg('Keine gültigen Einträge in der Datei.');
       const supByName = Object.fromEntries(supervisors.map((x) => [x.name.trim().toLowerCase(), x.id]));
       const key = (e) => [e.log, e.date, (e.types || []).join(','), e.extra || '', e.befund || ''].join('|');
-      const existing = new Set(entries.map(key));
+      // Aeltere Version derselben Importdatei ersetzen
+      const keep = new Set(list.map(key));
+      const replace = new Set((data.replaceKeys || []).filter((k) => !keep.has(k)));
+      const toRemove = entries.filter((e) => replace.has(key(e)));
       let batch = writeBatch(db);
       let ops = 0;
+      for (const e of toRemove) {
+        batch.delete(doc(refs.entries, e.id));
+        if (++ops >= 400) {
+          await batch.commit();
+          batch = writeBatch(db);
+          ops = 0;
+        }
+      }
+      const removedIds = new Set(toRemove.map((e) => e.id));
+      const existing = new Set(entries.filter((e) => !removedIds.has(e.id)).map(key));
       let added = 0;
       let skipped = 0;
       for (const e of list) {
@@ -622,7 +635,12 @@ function Settings({ settings, supervisors, entries, refs }) {
         }
       }
       if (ops) await batch.commit();
-      setImportMsg(`${added} Einträge importiert${skipped ? `, ${skipped} bereits vorhanden und übersprungen` : ''}.`);
+      setImportMsg(
+        `${added} Einträge importiert` +
+          (skipped ? `, ${skipped} bereits vorhanden und übersprungen` : '') +
+          (toRemove.length ? `, ${toRemove.length} ältere Importeinträge ersetzt` : '') +
+          '.',
+      );
     } catch (err) {
       setImportMsg('Import fehlgeschlagen: ' + err.message);
     }
