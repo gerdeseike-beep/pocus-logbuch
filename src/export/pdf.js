@@ -52,7 +52,13 @@ function footer(doc) {
   doc.setTextColor(0, 0, 0);
 }
 
-export async function buildPdf({ log, entries, settings, confirm, signDate, collective }) {
+export async function buildPdf({ log, entries, settings, confirm, signDate, collective, sigs = {} }) {
+  const supSig = log === 'sup' ? sigs.supervisor : null;
+  const appSig = sigs.applicant;
+  const fit = (sig, maxH, maxW) => {
+    const h = Math.min(maxH, (maxW * sig.h) / sig.w);
+    return [(h * sig.w) / sig.h, h];
+  };
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const logo = await loadLogo();
   const W = doc.internal.pageSize.getWidth();
@@ -123,6 +129,12 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
     didDrawPage: () => {
       header(doc, logo);
     },
+    didDrawCell: (d) => {
+      if (supSig && !collective && d.section === 'body' && d.column.index === 5) {
+        const [w, h] = fit(supSig, d.cell.height - 2, d.cell.width - 2);
+        doc.addImage(supSig.dataUrl, 'PNG', d.cell.x + 1, d.cell.y + (d.cell.height - h) / 2, w, h);
+      }
+    },
   });
 
   let y = doc.lastAutoTable.finalY + 12;
@@ -149,10 +161,13 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
     doc.text(b.name, lx, y);
     y += 9;
     doc.text('Datum:', MARGIN, y);
-    doc.text('________________________________', lx, y);
+    doc.text(supSig && sigs.supervisorDate ? fmtDate(sigs.supervisorDate) : '________________________________', lx, y);
     y += 9;
     doc.text('Unterschrift:', MARGIN, y);
-    doc.text('________________________________', lx, y);
+    if (supSig) {
+      const [w, h] = fit(supSig, 14, 60);
+      doc.addImage(supSig.dataUrl, 'PNG', lx, y - h + 2, w, h);
+    } else doc.text('________________________________', lx, y);
     y += 16;
   }
 
@@ -188,7 +203,10 @@ export async function buildPdf({ log, entries, settings, confirm, signDate, coll
   }
   y += 7;
   doc.text('Unterschrift Antragsteller:', MARGIN, y);
-  doc.text('________________________________', lx + 10, y);
+  if (appSig) {
+    const [w, h] = fit(appSig, 14, 60);
+    doc.addImage(appSig.dataUrl, 'PNG', lx + 10, y - h + 2, w, h);
+  } else doc.text('________________________________', lx + 10, y);
 
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i++) {

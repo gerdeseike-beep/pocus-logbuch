@@ -12,7 +12,8 @@ import {
 } from 'firebase/firestore';
 import { auth, db, firebaseConfigured, googleProvider } from './firebase.js';
 import { BEFUND_QUICK, DEFAULT_SETTINGS, EXAM_TYPES, KOMPONENTEN, LOGS } from './constants.js';
-import { buildDocx } from './export/docx.js';
+import { buildDocx, nrRanges } from './export/docx.js';
+import SignaturePad from './SignaturePad.jsx';
 import { buildPdf } from './export/pdf.js';
 import { downloadBlob, examText, fmtDate, numbered, slug, todayIso } from './utils.js';
 
@@ -460,6 +461,9 @@ function EntryList({ entries, supervisors, refs, onEdit }) {
 function Export({ entries, supervisors, settings }) {
   const [confirm, setConfirm] = useState(true);
   const [collective, setCollective] = useState(true);
+  const [useMySig, setUseMySig] = useState(true);
+  const [supSigs, setSupSigs] = useState({});
+  const [padFor, setPadFor] = useState(null);
   const [signDate, setSignDate] = useState(todayIso());
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -476,7 +480,12 @@ function Export({ entries, supervisors, settings }) {
     const key = `${log}-${format}-${supervisor?.id || ''}`;
     setBusy(key);
     try {
-      const opts = { log, entries: list, settings, confirm, signDate, collective };
+      const sigs = {
+        applicant: useMySig ? settings.signature || null : null,
+        supervisor: supervisor ? supSigs[supervisor.id]?.sig || null : null,
+        supervisorDate: supervisor ? supSigs[supervisor.id]?.date : null,
+      };
+      const opts = { log, entries: list, settings, confirm, signDate, collective, sigs };
       const blob = format === 'pdf' ? await buildPdf(opts) : await buildDocx(opts);
       const who = [settings.name, settings.vorname].filter(Boolean).join('_');
       const base =
@@ -516,6 +525,14 @@ function Export({ entries, supervisors, settings }) {
           <label className="inline">
             Datum <input type="date" value={signDate} onChange={(e) => setSignDate(e.target.value)} />
           </label>
+          {settings.signature ? (
+            <label className="inline">
+              <input type="checkbox" checked={useMySig} onChange={(e) => setUseMySig(e.target.checked)} /> Meine Unterschrift einfügen
+              <img className="sigthumb" src={settings.signature.dataUrl} alt="Unterschrift" />
+            </label>
+          ) : (
+            <span className="muted small">Eigene Unterschrift: unter Einstellungen hinterlegen.</span>
+          )}
         </div>
       </div>
 
@@ -536,15 +553,47 @@ function Export({ entries, supervisors, settings }) {
           <input type="checkbox" checked={collective} onChange={(e) => setCollective(e.target.checked)} /> Sammelbestätigung: Supervisor unterschreibt einmal am Ende statt jede Zeile
         </label>
         {supervisors.length === 0 && <p className="muted">Noch keine Supervisoren erfasst.</p>}
-        {supervisors.map((s) => (
-          <div className="row between sup-row" key={s.id}>
-            <div>
-              <strong>{s.name}</strong>
-              <div className="muted small">{supCounts[s.id]} Untersuchungen</div>
+        {supervisors.map((s) => {
+          const sig = supSigs[s.id];
+          return (
+            <div className="row between sup-row wrap" key={s.id}>
+              <div>
+                <strong>{s.name}</strong>
+                <div className="muted small">{supCounts[s.id]} Untersuchungen</div>
+                {sig && (
+                  <div className="row">
+                    <span className="signed">✓ Unterschrieben</span>
+                    <img className="sigthumb" src={sig.sig.dataUrl} alt="Unterschrift" />
+                    <button className="icon" title="Unterschrift entfernen" onClick={() => setSupSigs(({ [s.id]: _, ...rest }) => rest)}>✕</button>
+                  </div>
+                )}
+              </div>
+              <div className="row wrap">
+                {supCounts[s.id] > 0 && (
+                  <button className="btn small ghost" onClick={() => setPadFor(s)}>
+                    {sig ? 'Neu unterschreiben' : 'Digital unterschreiben'}
+                  </button>
+                )}
+                <Buttons log="sup" supervisor={s} />
+              </div>
             </div>
-            <Buttons log="sup" supervisor={s} />
-          </div>
-        ))}
+          );
+        })}
+        {padFor && (
+          <SignaturePad
+            title={`Unterschrift ${padFor.name}`}
+            subtitle={`Bestätigt die Supervision von ${supCounts[padFor.id]} Untersuchungen (Nr. ${nrRanges(
+              numbered(entries, 'sup')
+                .filter((e) => e.supervisorId === padFor.id)
+                .map((e) => e.nr),
+            )}). Gilt nur für diesen Export und wird nicht gespeichert.`}
+            onCancel={() => setPadFor(null)}
+            onSave={(sig) => {
+              setSupSigs((x) => ({ ...x, [padFor.id]: { sig, date: todayIso() } }));
+              setPadFor(null);
+            }}
+          />
+        )}
       </div>
       {err && <p className="error">{err}</p>}
     </div>
@@ -575,6 +624,8 @@ function Settings({ settings, supervisors, entries, refs }) {
   };
 
   const [importMsg, setImportMsg] = useState('');
+  const [pad, setPad] = useState(false);
+  const saveSignature = (sig) => setDoc(refs.user, { settings: { signature: sig } }, { merge: true });
   const importFile = async (ev) => {
     const file = ev.target.files?.[0];
     ev.target.value = '';
@@ -697,6 +748,30 @@ function Settings({ settings, supervisors, entries, refs }) {
           <button className="btn primary" onClick={save}>Speichern</button>
           {saved && <span className="ok">{saved}</span>}
         </div>
+      </div>
+
+      <div className="card stack">
+        <h2>Meine Unterschrift</h2>
+        <p className="muted small">Wird im Export beim Antragsteller eingefügt.</p>
+        <div className="row wrap">
+          {settings.signature && <img className="sigthumb big" src={settings.signature.dataUrl} alt="Unterschrift" />}
+          <button className="btn small" onClick={() => setPad(true)}>
+            {settings.signature ? 'Neu erfassen' : 'Unterschrift erfassen'}
+          </button>
+          {settings.signature && (
+            <button className="btn small ghost" onClick={() => saveSignature(null)}>Entfernen</button>
+          )}
+        </div>
+        {pad && (
+          <SignaturePad
+            title="Meine Unterschrift"
+            onCancel={() => setPad(false)}
+            onSave={async (sig) => {
+              await saveSignature(sig);
+              setPad(false);
+            }}
+          />
+        )}
       </div>
 
       <div className="card stack">
