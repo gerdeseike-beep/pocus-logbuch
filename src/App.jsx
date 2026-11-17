@@ -257,6 +257,8 @@ function EntryForm({ supervisors, refs, editing, onDone }) {
   const [types, setTypes] = useState(editing?.types || []);
   const [extra, setExtra] = useState(editing?.extra || '');
   const [befund, setBefund] = useState(editing?.befund || '');
+  const [initials, setInitials] = useState(editing?.initials || '');
+  const [birthDate, setBirthDate] = useState(editing?.birthDate || '');
   const [supId, setSupId] = useState(editing?.supervisorId || localStorage.getItem('lastSup') || '');
   const [newSup, setNewSup] = useState('');
   const [msg, setMsg] = useState('');
@@ -291,7 +293,17 @@ function EntryForm({ supervisors, refs, editing, onDone }) {
         }
         localStorage.setItem('lastSup', supervisorId);
       }
-      const data = { log, date, types, extra: extra.trim(), befund: befund.trim(), supervisorId, supervisorName };
+      const data = {
+        log,
+        date,
+        types,
+        extra: extra.trim(),
+        befund: befund.trim(),
+        initials: initials.trim(),
+        birthDate,
+        supervisorId,
+        supervisorName,
+      };
       if (editing) {
         await updateDoc(doc(refs.entries, editing.id), data);
         setMsg('Geändert.');
@@ -303,6 +315,8 @@ function EntryForm({ supervisors, refs, editing, onDone }) {
       setTypes([]);
       setExtra('');
       setBefund('');
+      setInitials('');
+      setBirthDate('');
       setTimeout(() => setMsg(''), 2500);
       onDone?.();
     } catch (e) {
@@ -324,10 +338,21 @@ function EntryForm({ supervisors, refs, editing, onDone }) {
         ))}
       </div>
 
-      <label>
-        Datum
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-      </label>
+      <div className="grid3">
+        <label>
+          Datum
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </label>
+        <label>
+          Initialen (optional)
+          <input value={initials} onChange={(e) => setInitials(e.target.value)} placeholder="z.B. M.P." maxLength={10} />
+        </label>
+        <label>
+          Geburtsdatum (optional)
+          <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+        </label>
+      </div>
+      <div className="muted small">Initialen und Geburtsdatum erscheinen nicht im Export.</div>
 
       <div>
         <div className="lbl">Untersuchung (mehrere möglich)</div>
@@ -428,6 +453,7 @@ function EntryList({ entries, supervisors, refs, onEdit }) {
               <tr>
                 <th>Nr.</th>
                 <th>Datum</th>
+                <th>Patient</th>
                 <th>Untersuchung</th>
                 <th>Befund</th>
                 {log === 'sup' && <th>Supervisor</th>}
@@ -439,6 +465,10 @@ function EntryList({ entries, supervisors, refs, onEdit }) {
                 <tr key={e.id}>
                   <td>{e.nr}</td>
                   <td className="nowrap">{fmtDate(e.date)}</td>
+                  <td className="nowrap small">
+                    {e.initials}
+                    {e.birthDate && <div className="muted">{fmtDate(e.birthDate)}</div>}
+                  </td>
                   <td>{examText(e)}</td>
                   <td>{e.befund}</td>
                   {log === 'sup' && <td>{e.supervisorName}</td>}
@@ -651,12 +681,23 @@ function Settings({ settings, supervisors, entries, refs }) {
         }
       }
       const removedIds = new Set(toRemove.map((e) => e.id));
-      const existing = new Set(entries.filter((e) => !removedIds.has(e.id)).map(key));
+      const existingByKey = Object.fromEntries(entries.filter((e) => !removedIds.has(e.id)).map((e) => [key(e), e]));
+      const existing = new Set(Object.keys(existingByKey));
       let added = 0;
       let skipped = 0;
+      let updated = 0;
       for (const e of list) {
         if (existing.has(key(e))) {
-          skipped++;
+          // vorhandenen Eintrag um fehlende Patientenangaben ergaenzen
+          const cur = existingByKey[key(e)];
+          const patch = {};
+          if (cur && e.initials && !cur.initials) patch.initials = e.initials;
+          if (cur && e.birthDate && !cur.birthDate) patch.birthDate = e.birthDate;
+          if (Object.keys(patch).length) {
+            batch.update(doc(refs.entries, cur.id), patch);
+            updated++;
+            ops++;
+          } else skipped++;
           continue;
         }
         let supervisorId = null;
@@ -678,6 +719,8 @@ function Settings({ settings, supervisors, entries, refs }) {
           types: e.types || [],
           extra: e.extra || '',
           befund: e.befund || '',
+          initials: e.initials || '',
+          birthDate: e.birthDate || '',
           supervisorId,
           supervisorName,
           createdAt: e.createdAt || Date.now() + added,
@@ -693,6 +736,7 @@ function Settings({ settings, supervisors, entries, refs }) {
       if (ops) await batch.commit();
       setImportMsg(
         `${added} Einträge importiert` +
+          (updated ? `, ${updated} vorhandene um Initialen/Geburtsdatum ergänzt` : '') +
           (skipped ? `, ${skipped} bereits vorhanden und übersprungen` : '') +
           (toRemove.length ? `, ${toRemove.length} ältere Importeinträge ersetzt` : '') +
           '.',
